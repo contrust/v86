@@ -9,12 +9,9 @@ COPY . .
 
 RUN PATH="${HOME}/.cargo/bin:${PATH}" make all && rm -rf closure-compiler gen lib src tools .cargo cargo.toml Makefile
 
-FROM python:3.10.13-alpine3.19
+FROM docker:26.1.3-alpine3.20
 WORKDIR /v86
 
 COPY --from=v86-builder v86 .
 
-ARG PORT=8000
-CMD python3 -m http.server ${PORT}
-
-EXPOSE ${PORT}
+RUN apk add python3 nodejs zstd

@@ -1,0 +1,26 @@
+services:
+  web:
+    container_name: "mininet-web-server"
+    image: mininet-web-server:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    volumes:
+      - images:/v86/images/
+    ports:
+      - "127.0.0.1:8000:8000"
+    network_mode: "host"
+  image-builder:
+    container_name: "mininet-image-builder"
+    image: mininet-image-builder
+    build:
+      context: .
+      dockerfile: Dockerfile.image_builder
+    command: ["sh", "-c" , "cd image-builder && ./build.sh"]
+    volumes:
+      - images:/v86/images/
+      - /var/run/docker.sock:/var/run/docker.sock
+
+
+volumes:
+  images:

@@ -115,7 +115,6 @@ function V86(options)
         "microtick": v86.microtick,
         "get_rand_int": function() { return v86util.get_rand_int(); },
         "apic_acknowledge_irq": function() { return cpu.devices.apic.acknowledge_irq(); },
-        "stop_idling": function() { return cpu.stop_idling(); },
 
         "io_port_read8": function(addr) { return cpu.io.port_read8(addr); },
         "io_port_read16": function(addr) { return cpu.io.port_read16(addr); },
@@ -552,53 +551,62 @@ V86.prototype.continue_init = async function(emulator, options)
             if(!settings.initial_state)
             {
                 settings.fs9p.load_from_json(settings.fs9p_json);
-
-                if(options.bzimage_initrd_from_filesystem)
-                {
-                    const { bzimage_path, initrd_path } = this.get_bzimage_initrd_from_filesystem(settings.fs9p);
-
-                    dbg_log("Found bzimage: " + bzimage_path + " and initrd: " + initrd_path);
-
-                    const [initrd, bzimage] = await Promise.all([
-                        settings.fs9p.read_file(initrd_path),
-                        settings.fs9p.read_file(bzimage_path),
-                    ]);
-                    put_on_settings.call(this, "initrd", new v86util.SyncBuffer(initrd.buffer));
-                    put_on_settings.call(this, "bzimage", new v86util.SyncBuffer(bzimage.buffer));
-                }
             }
             else
             {
                 dbg_log("Filesystem basefs ignored: Overridden by state image");
             }
+
+            if(options.bzimage_initrd_from_filesystem)
+            {
+                const { bzimage_path, initrd_path } = this.get_bzimage_initrd_from_filesystem(settings.fs9p);
+
+                dbg_log("Found bzimage: " + bzimage_path + " and initrd: " + initrd_path);
+
+                const [initrd, bzimage] = await Promise.all([
+                    settings.fs9p.read_file(initrd_path),
+                    settings.fs9p.read_file(bzimage_path),
+                ]);
+                put_on_settings.call(this, "initrd", new v86util.SyncBuffer(initrd.buffer));
+                put_on_settings.call(this, "bzimage", new v86util.SyncBuffer(bzimage.buffer));
+                finish.call(this);
+            }
+            else
+            {
+                finish.call(this);
+            }
         }
         else
         {
             dbg_assert(
-                !options.bzimage_initrd_from_filesystem || settings.initial_state,
+                !options.bzimage_initrd_from_filesystem,
                 "bzimage_initrd_from_filesystem: Requires a filesystem");
+            finish.call(this);
         }
 
-        this.serial_adapter && this.serial_adapter.show && this.serial_adapter.show();
-
-        this.bus.send("cpu-init", settings);
-
-        if(settings.initial_state)
+        function finish()
         {
-            emulator.restore_state(settings.initial_state);
+            this.serial_adapter && this.serial_adapter.show && this.serial_adapter.show();
 
-            // The GC can't free settings, since it is referenced from
-            // several closures. This isn't needed anymore, so we delete it
-            // here
-            settings.initial_state = undefined;
+            this.bus.send("cpu-init", settings);
+
+            if(settings.initial_state)
+            {
+                emulator.restore_state(settings.initial_state);
+
+                // The GC can't free settings, since it is referenced from
+                // several closures. This isn't needed anymore, so we delete it
+                // here
+                settings.initial_state = undefined;
+            }
+
+            if(options.autostart)
+            {
+                this.bus.send("cpu-run");
+            }
+
+            this.emulator_bus.send("emulator-loaded");
         }
-
-        if(options.autostart)
-        {
-            this.bus.send("cpu-run");
-        }
-
-        this.emulator_bus.send("emulator-loaded");
     }
 };
 
@@ -646,7 +654,7 @@ V86.prototype.zstd_decompress_worker = async function(decompressed_size, src)
                     const env = Object.fromEntries([
                         "cpu_exception_hook", "run_hardware_timers",
                         "cpu_event_halt", "microtick", "get_rand_int",
-                        "apic_acknowledge_irq", "stop_idling",
+                        "apic_acknowledge_irq",
                         "io_port_read8", "io_port_read16", "io_port_read32",
                         "io_port_write8", "io_port_write16", "io_port_write32",
                         "mmap_read8", "mmap_read16", "mmap_read32",

@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: mininet-web
+  name: mininet-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mininet-web
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: mininet-web
+    spec:
+      containers:
+      - image: mininet-web-server:latest
+        name: mininet-web-server
+        resources: {}
+status: {}

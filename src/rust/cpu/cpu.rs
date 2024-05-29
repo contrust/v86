@@ -7,7 +7,6 @@ extern "C" {
     pub fn run_hardware_timers(acpi_enabled: bool, t: f64) -> f64;
     pub fn cpu_event_halt();
     pub fn apic_acknowledge_irq() -> i32;
-    pub fn stop_idling();
 
     pub fn io_port_read8(port: i32) -> i32;
     pub fn io_port_read16(port: i32) -> i32;
@@ -1897,7 +1896,7 @@ pub unsafe fn do_page_walk(
     side_effects: bool,
 ) -> OrPageFault<std::num::NonZeroI32> {
     let global;
-    let mut allow_user = true;
+    let mut allow_user: bool = true;
     let page = (addr as u32 >> 12) as i32;
     let high;
 
@@ -1952,12 +1951,15 @@ pub unsafe fn do_page_walk(
 
         let kernel_write_override = !user && 0 == cr0 & CR0_WP;
         let mut allow_write = page_dir_entry & PAGE_TABLE_RW_MASK != 0;
+
         allow_user &= page_dir_entry & PAGE_TABLE_USER_MASK != 0;
 
         if 0 != page_dir_entry & PAGE_TABLE_PSE_MASK && 0 != cr4 & CR4_PSE {
             // size bit is set
 
-            if for_writing && !allow_write && !kernel_write_override || user && !allow_user {
+            let user_error = user && !allow_user;
+            let write_error = for_writing && !allow_write && !kernel_write_override;
+            if user_error || write_error {
                 if side_effects {
                     trigger_pagefault(addr, true, for_writing, user, jit);
                 }
@@ -2005,16 +2007,21 @@ pub unsafe fn do_page_walk(
                 (page_table_addr, page_table_entry)
             };
 
-            let present = page_table_entry & PAGE_TABLE_PRESENT_MASK != 0;
+            if page_table_entry & PAGE_TABLE_PRESENT_MASK == 0 {
+                if side_effects {
+                    trigger_pagefault(addr, false, for_writing, user, jit);
+                }
+                return Err(());
+            }
+
             allow_write &= page_table_entry & PAGE_TABLE_RW_MASK != 0;
             allow_user &= page_table_entry & PAGE_TABLE_USER_MASK != 0;
 
-            if !present
-                || for_writing && !allow_write && !kernel_write_override
-                || user && !allow_user
-            {
+            let user_error = user && !allow_user;
+            let write_error = for_writing && !allow_write && !kernel_write_override;
+            if user_error || write_error {
                 if side_effects {
-                    trigger_pagefault(addr, present, for_writing, user, jit);
+                    trigger_pagefault(addr, true, for_writing, user, jit);
                 }
                 return Err(());
             }
@@ -2055,7 +2062,7 @@ pub unsafe fn do_page_walk(
     // entries from tlb_data but not from valid_tlb_entries
     }
     else if side_effects && CHECK_TLB_INVARIANTS {
-        let mut found = false;
+        let mut found: bool = false;
         for i in 0..valid_tlb_entries_count {
             if valid_tlb_entries[i as usize] == page {
                 found = true;
@@ -2117,7 +2124,7 @@ pub unsafe fn clear_tlb() {
     profiler::stat_increment(CLEAR_TLB);
     // clear tlb excluding global pages
     *last_virt_eip = -1;
-    let mut global_page_offset = 0;
+    let mut global_page_offset: i32 = 0;
     for i in 0..valid_tlb_entries_count {
         let page = valid_tlb_entries[i as usize];
         let entry = tlb_data[page as usize];
@@ -4102,8 +4109,8 @@ pub unsafe fn invlpg(addr: i32) {
 
 #[no_mangle]
 pub unsafe fn update_eflags(new_flags: i32) {
-    let mut dont_update = FLAG_RF | FLAG_VM | FLAG_VIP | FLAG_VIF;
-    let mut clear = !FLAG_VIP & !FLAG_VIF & FLAGS_MASK;
+    let mut dont_update: i32 = FLAG_RF | FLAG_VM | FLAG_VIP | FLAG_VIF;
+    let mut clear: i32 = !FLAG_VIP & !FLAG_VIF & FLAGS_MASK;
     if 0 != *flags & FLAG_VM {
         // other case needs to be handled in popf or iret
         dbg_assert!(getiopl() == 3);
@@ -4140,7 +4147,7 @@ pub unsafe fn get_valid_tlb_entries_count() -> i32 {
     if !cfg!(feature = "profiler") {
         return 0;
     }
-    let mut result = 0;
+    let mut result: i32 = 0;
     for i in 0..valid_tlb_entries_count {
         let page = valid_tlb_entries[i as usize];
         let entry = tlb_data[page as usize];
@@ -4156,7 +4163,7 @@ pub unsafe fn get_valid_global_tlb_entries_count() -> i32 {
     if !cfg!(feature = "profiler") {
         return 0;
     }
-    let mut result = 0;
+    let mut result: i32 = 0;
     for i in 0..valid_tlb_entries_count {
         let page = valid_tlb_entries[i as usize];
         let entry = tlb_data[page as usize];
@@ -4211,10 +4218,7 @@ pub unsafe fn handle_irqs() {
 
 unsafe fn pic_call_irq(interrupt_nr: u8) {
     *previous_ip = *instruction_pointer; // XXX: What if called after instruction (port IO)
-    if *in_hlt {
-        stop_idling();
-        *in_hlt = false;
-    }
+    *in_hlt = false;
     call_interrupt_vector(interrupt_nr as i32, false, None);
 }
 
